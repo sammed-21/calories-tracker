@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/go-playground/validator/v10"
 
 	"github.com/sammed-21/go-calorie-tracker/models"
 	"go.mongodb.org/mongo-driver/bson/primitive"
@@ -14,6 +15,7 @@ import (
 	"gopkg.in/mgo.v2/bson"
 )
 
+var validate = validator.New()
 var entryCollection *mongo.Collection = OpenCollection(Client, "calories")
 
 func AddEntry(c *gin.Context) {
@@ -117,10 +119,52 @@ func UpdateEntry(c *gin.Context) {
 }
 
 func GetEntriesByIngredient(c *gin.Context) {
-
+	ingredient := c.Params.ByName("id")
+	var ctx, cancel = context.WithTimeout(context.Background(), 100*time.Second)
+	var entries []bson.M
+	cursor, err := entryCollection.Find(ctx, bson.M{"ingredients": ingredient})
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		fmt.Println(err)
+		return
+	}
+	if err = cursor.All(ctx, &entries); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		fmt.Println(err)
+		return
+	}
+	defer cancel()
+	fmt.Println(entries)
+	c.JSON(http.StatusOK, entries)
 }
 
-func UpdateIngredient(c *gin.Context) {}
+func UpdateIngredient(c *gin.Context) {
+	entryID := c.Params.ByName("id")
+	docId, _ := primitive.ObjectIDFromHex(entryID)
+	var ctx, cancel = context.WithTimeout(context.Background(), 100*time.Second)
+	type Ingredients struct {
+		Ingredients *string `json:"ingredients"`
+	}
+	var ingredient Ingredients
+	if err := c.BindJSON(&ingredient); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		fmt.Println(err)
+		return
+	}
+
+	result, err := entryCollection.UpdateOne(ctx,
+		bson.M{"_id": docId},
+		bson.D{{"$set", bson.D{{"ingredients", ingredient.Ingredients}}}},
+	)
+
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		fmt.Println(err)
+		return
+	}
+	defer cancel()
+	c.JSON(http.StatusOK, result.ModifiedCount)
+}
 
 func DeleteEntry(c *gin.Context) {
 	entryID := c.Params.ByName("id")
@@ -134,6 +178,6 @@ func DeleteEntry(c *gin.Context) {
 		return
 	}
 	defer cancel()
-	c.JSON(http.StatusOK, result.DeleteCount)
+	c.JSON(http.StatusOK, result.DeletedCount)
 
 }
